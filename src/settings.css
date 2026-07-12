@@ -1,0 +1,153 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: #111111;
+  color: #e5e5e5;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+[title] {
+  cursor: help;
+  position: relative;
+}
+
+[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #000000;
+  color: #ffffff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: normal;
+  text-align: center;
+  z-index: 1000;
+  pointer-events: none;
+  margin-bottom: 6px;
+  border: 1px solid #333333;
+}
+
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 18px;
+}
+
+h1 {
+  font-size: 18px;
+  margin-bottom: 14px;
+}
+
+.card {
+  background: #1f1f1f;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.card h2 {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #b3b3b3;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field.small {
+  max-width: 160px;
+}
+
+label {
+  font-size: 12px;
+  color: #cfcfcf;
+}
+
+input, select {
+  background: #141414;
+  color: #f5f5f5;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+input[type="color"] {
+  height: 32px;
+  padding: 2px;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+button {
+  background: #262626;
+  color: #f5f5f5;
+  border: 1px solid #2a2a2a;
+  border-radius: 5px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #2f2f2f;
+}
+
+#save {
+  background: #2563eb;
+  border-color: #1d4ed8;
+}
+
+#save:hover {
+  background: #1d4ed8;
+}
+
+#open-config-folder {
+  background: #374151;
+  border-color: #4b5563;
+}
+
+#open-config-folder:hover {
+  background: #4b5563;
+}
+
+.status {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.status[data-status="ok"] { color: #4ade80; }
+.status[data-status="error"] { color: #f87171; }

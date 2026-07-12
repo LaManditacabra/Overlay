@@ -1,0 +1,54 @@
+{
+  "name": "stream-chat-overlay",
+  "version": "1.0.0",
+  "description": "Overlay de chat transparente con click-through para streaming",
+  "main": "main.js",
+  "scripts": {
+    "start": "set STREAM_CHAT_OVERLAY_DEVTOOLS=1&& node_modules\\electron\\dist\\electron.exe .",
+    "build": "electron-builder --win",
+    "postinstall": "electron-builder install-app-deps",
+    "publish": "node publish-updates.js",
+    "serve-updates": "node serve-updates.js"
+  },
+  "build": {
+    "appId": "com.local.streamchat",
+    "productName": "Stream Chat Overlay",
+    "publish": {
+      "provider": "github",
+      "owner": "LaManditacabra",
+      "repo": "Overlay"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.ts",
+      "!node_modules/**/*.map",
+      "!node_modules/electron/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false,
+      "icon": "assets/icon.ico"
+    },
+    "artifactName": "StreamChatOverlay-${version}-Setup.exe"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LaManditacabra/Overlay.git"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^26.15.3"
+  }
+}

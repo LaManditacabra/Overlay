@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Configuración - Stream Chat Overlay</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Configuración del Overlay</h1>
+
+    <section class="card">
+      <h2>💬 Chat</h2>
+      <div class="row">
+        <div class="field" title="Elegí de qué plataforma querés mostrar el chat. 'Demo' usa mensajes simulados para probar.">
+          <label for="platform">Plataforma</label>
+          <select id="platform">
+            <option value="demo">Demo (mensajes simulados)</option>
+            <option value="twitch">Twitch</option>
+            <option value="youtube">YouTube Live</option>
+            <option value="kick">Kick</option>
+          </select>
+        </div>
+        <div class="field" title="Nombre del canal o ID del chat de la plataforma elegida.">
+          <label for="channel">Canal / ID de chat</label>
+          <input id="channel" type="text" placeholder="ej: mi_canal" />
+        </div>
+        <div class="field" title="Usuario / Nick para conectarse al chat (Twitch usa este nombre para saludar).">
+          <label for="username">Usuario / Nick</label>
+          <input id="username" type="text" placeholder="ej: mi_usuario" />
+        </div>
+      </div>
+      <div class="row">
+        <button id="link-twitch" type="button" title="Abrí tu navegador, iniciá sesión en Twitch y autorizá. El token se rellena solo.">🔗 Iniciar sesión con Twitch</button>
+      </div>
+      <p class="hint">💡 Solo hacé clic en <strong>Iniciar sesión con Twitch</strong>: se abre el navegador, ponés tu usuario y contraseña de Twitch, le dan autorizar y listo. (Tu app de Twitch debe tener <code>http://localhost:3000</code> como Redirect URI.)</p>
+    </section>
+
+    <section class="card">
+      <h2>🎨 Apariencia</h2>
+      <div class="row">
+        <div class="field small" title="Tamaño del texto de los mensajes en píxeles.">
+          <label for="fontSize">Tamaño de fuente</label>
+          <input id="fontSize" type="number" min="10" max="28" />
+        </div>
+        <div class="field" title="Fuente del texto (ej: Segoe UI, Arial, Consolas).">
+          <label for="fontFamily">Fuente</label>
+          <input id="fontFamily" type="text" />
+        </div>
+        <div class="field small" title="Opacidad de los mensajes: 1.0 es sólido, 0.2 es muy transparente.">
+          <label for="opacity">Opacidad mensaje</label>
+          <input id="opacity" type="number" min="0.2" max="1" step="0.05" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" title="Color de fondo de los mensajes en formato RGB (rojo, verde, azul). Ej: 0, 0, 0 = negro.">
+          <label for="bgColor">Color de fondo RGB</label>
+          <input id="bgColor" type="text" placeholder="0, 0, 0" />
+        </div>
+        <div class="field" title="Color principal del texto de los mensajes.">
+          <label for="textColor">Color de texto</label>
+          <input id="textColor" type="color" />
+        </div>
+      </div>
+      <div class="row">
+        <label class="checkbox" title="Mostrar el nombre de cada usuario con su color característico.">
+          <input id="usernameColors" type="checkbox" />
+          <span>Colores en nombres de usuario</span>
+        </label>
+        <label class="checkbox" title="Mostrar iconos de Moderador, Suscriptor, VIP al lado del nombre.">
+          <input id="showBadges" type="checkbox" />
+          <span>Mostrar badges (insignias)</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>📨 Mensajes</h2>
+      <div class="row">
+        <div class="field small" title="Cantidad máxima de mensajes visibles en pantalla a la vez.">
+          <label for="maxMessages">Máx. mensajes</label>
+          <input id="maxMessages" type="number" min="5" max="100" />
+        </div>
+        <div class="field small" title="Tiempo entre cada mensaje nuevo en milisegundos (1000 ms = 1 segundo).">
+          <label for="interval">Intervalo (ms)</label>
+          <input id="interval" type="number" min="400" max="10000" step="100" />
+        </div>
+      </div>
+      <label class="checkbox" title="Activar el modo demo: la app muestra mensajes falsos para que pruebes cómo se ve.">
+        <input id="demoMode" type="checkbox" />
+        <span>Modo demo / simulación</span>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>🔄 Actualizaciones</h2>
+      <div class="row">
+        <div class="field" title="URL donde la app busca actualizaciones. Por default usa GitHub Releases.">
+          <label for="updateFeedUrl">URL del servidor de actualizaciones</label>
+          <input id="updateFeedUrl" type="text" placeholder="https://github.com/LaManditacabra/Overlay/releases/latest" />
+        </div>
+      </div>
+      <div class="row">
+        <button id="check-updates" type="button" title="Buscar si hay una versión nueva disponible.">🔍 Buscar actualizaciones</button>
+        <button id="install-update" type="button" disabled title="Instalar la actualización descargada. Se cerrará y reiniciará solo.">⬇️ Instalar actualización</button>
+      </div>
+      <p id="update-status" class="status" data-status="idle">Estado: sin comprobar</p>
+      <p class="hint">🔔 La app buscará actualizaciones automáticamente al iniciar. Podés cambiar el servidor o desactivarlo dejando la URL vacía.</p>
+    </section>
+
+    <section class="card actions-card">
+      <h2>⚙️ Acciones</h2>
+      <div class="row">
+        <button id="open-config-folder" type="button" title="Abrir la carpeta donde se guarda la configuración.">📂 Abrir carpeta de configuración</button>
+        <button id="reset" type="button" title="Volver a la configuración original de fábrica.">♻️ Restablecer</button>
+        <button id="save" type="button" title="Guardar todos los cambios realizados.">💾 Guardar</button>
+      </div>
+      <p id="status" class="status" data-status="idle">Sin cambios</p>
+    </section>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>
