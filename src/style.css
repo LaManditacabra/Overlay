@@ -93,6 +93,17 @@ html, body {
   }
 }
 
+.chat-message.fade-out {
+  animation: fadeOut 0.3s ease-in forwards;
+}
+
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
 .message-header {
   display: flex;
   align-items: center;

@@ -54,6 +54,7 @@ let config = {
 };
 
 let chatInterval = null;
+let firstRealMessageHandled = false;
 
 function randomItem(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -82,13 +83,18 @@ function applyConfig(next) {
     container.removeChild(container.firstChild);
   }
 
+  if (firstRealMessageHandled) config.demoMode = false;
   restartInterval();
 }
 
 function restartInterval() {
-  if (chatInterval) clearInterval(chatInterval);
+  if (chatInterval) {
+    clearInterval(chatInterval);
+    chatInterval = null;
+  }
+  if (!config.demoMode) return;
   chatInterval = setInterval(() => {
-    if (config.demoMode && Math.random() > 0.45) {
+    if (Math.random() > 0.45) {
       addMessage();
     }
   }, config.messageInterval);
@@ -122,6 +128,20 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+function clearMessagesWithTransition(callback) {
+  const container = document.getElementById('chat-container');
+  const messages = container.querySelectorAll('.chat-message');
+  if (messages.length === 0) {
+    if (callback) callback();
+    return;
+  }
+  messages.forEach(el => el.classList.add('fade-out'));
+  setTimeout(() => {
+    container.innerHTML = '';
+    if (callback) callback();
+  }, 350);
 }
 
 function addMessage(userOrName, text = null) {
@@ -221,6 +241,16 @@ async function init() {
   
   // Escuchar mensajes del chat real
   electronAPI.onChatMessage((msg) => {
+    if (!firstRealMessageHandled && msg.type === 'message') {
+      firstRealMessageHandled = true;
+      config.demoMode = false;
+      if (chatInterval) {
+        clearInterval(chatInterval);
+        chatInterval = null;
+      }
+      clearMessagesWithTransition(() => addMessage(msg));
+      return;
+    }
     addMessage(msg);
   });
 }
