@@ -1,9 +1,9 @@
 const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
-const { spawn } = require('child_process');
 const os = require('os');
 const net = require('net');
 
@@ -31,10 +31,6 @@ let tray;
 
 let CONFIG_PATH = '';
 
-function ensurePaths() {
-  CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
-}
-
 const DEFAULT_CONFIG = {
   platform: 'demo',
   channel: '',
@@ -54,7 +50,44 @@ const DEFAULT_CONFIG = {
   updateFeedUrl: 'https://github.com/LaManditacabra/Overlay/releases/latest'
 };
 
+const UPDATE_OWNER = 'LaManditacabra';
+const UPDATE_REPO = 'Overlay';
+
 let config = { ...DEFAULT_CONFIG };
+
+function ensurePaths() {
+  CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
+}
+
+function getConfig() {
+  bootLog('getConfig llamado');
+  return { ...config };
+}
+
+function notifyUpdateStatus(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updater-status', payload);
+  }
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.webContents.send('updater-status', payload);
+  }
+}
+
+function ensureUpdaterFile() {
+  try {
+    if (!app.isPackaged) return;
+    const resourcesDir = path.join(process.resourcesPath);
+    const updaterFile = path.join(resourcesDir, 'app-update.yml');
+    if (!fs.existsSync(resourcesDir)) {
+      fs.mkdirSync(resourcesDir, { recursive: true });
+    }
+    if (!fs.existsSync(updaterFile)) {
+      fs.writeFileSync(updaterFile, '', 'utf8');
+    }
+  } catch (e) {
+    bootLog('ensureUpdaterFile ERROR: ' + (e && e.stack ? e.stack : String(e)));
+  }
+}
 
 function loadConfig() {
   try {
@@ -85,11 +118,6 @@ function saveConfig() {
   }
 }
 
-function getConfig() {
-  bootLog('getConfig llamado');
-  return { ...config };
-}
-
 function updateConfig(partial) {
   bootLog('updateConfig: ' + JSON.stringify(partial));
   config = { ...config, ...partial };
@@ -97,154 +125,93 @@ function updateConfig(partial) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('config-updated', config);
   }
-  
+
   // Reconectar al chat si cambió plataforma, canal o token
   if (partial.platform !== undefined || partial.channel !== undefined || partial.token !== undefined) {
     connectToTwitchChat(config.channel, config.token);
   }
 }
 
-function notifyUpdateStatus(payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('updater-status', payload);
-  }
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.webContents.send('updater-status', payload);
-  }
-}
+function setupAutoUpdater() {
+  ensureUpdaterFile();
+  try {
+    // Apunta al repositorio de GitHub donde se publican las releases.
+    autoUpdater.setFeedURL({ provider: 'github', owner: UPDATE_OWNER, repo: UPDATE_REPO });
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.allowDowngrade = false;
 
-function normalizeFeedUrl(raw) {
-  let url = (raw || '').trim();
-  if (!url) return '';
-  if (url.endsWith('/')) url = url.slice(0, -1);
-  return url;
-}
-
-function httpGet(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('Respuesta JSON inválida')); }
-      });
-    }).on('error', reject);
-  });
-}
-
-function httpDownload(url, dest) {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-    https.get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        httpDownload(res.headers.location, dest).then(resolve).catch(reject);
-        return;
-      }
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        return;
-      }
-      res.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        resolve(dest);
-      });
-    }).on('error', (err) => {
-      fs.unlink(dest, () => {});
-      reject(err);
+    autoUpdater.on('checking-for-update', () => {
+      notifyUpdateStatus({ status: 'checking', message: '🔍 Buscando actualizaciones...' });
     });
-  });
+    autoUpdater.on('update-available', (info) => {
+      notifyUpdateStatus({
+        status: 'available',
+        message: `⬇️ Actualización disponible: ${info.version || ''}`,
+        info: { version: info.version },
+      });
+    });
+    autoUpdater.on('update-not-available', () => {
+      notifyUpdateStatus({ status: 'none', message: '✅ Ya tenés la última versión' });
+    });
+    autoUpdater.on('download-progress', (progress) => {
+      const pct = progress && typeof progress.percent === 'number' ? Math.round(progress.percent) : 0;
+      notifyUpdateStatus({ status: 'downloading', message: `📥 Descargando actualización... ${pct}%` });
+    });
+    autoUpdater.on('update-downloaded', (info) => {
+      notifyUpdateStatus({
+        status: 'downloaded',
+        message: `✅ Actualización lista (${info.version || ''}). Reiniciá para instalar.`,
+        info: { version: info.version },
+      });
+    });
+    autoUpdater.on('error', (err) => {
+      notifyUpdateStatus({
+        status: 'error',
+        message: '❌ Error de actualización: ' + (err && err.message ? err.message : err),
+      });
+    });
+
+    isUpdaterEnabled = true;
+    bootLog('setupAutoUpdater: OK, feed=github:' + UPDATE_OWNER + '/' + UPDATE_REPO);
+  } catch (e) {
+    bootLog('setupAutoUpdater ERROR: ' + (e && e.stack ? e.stack : String(e)));
+    isUpdaterEnabled = false;
+  }
 }
 
 async function checkForUpdates() {
-  const feedUrl = normalizeFeedUrl(config.updateFeedUrl);
-  if (!feedUrl) {
+  if (!isUpdaterEnabled) {
     notifyUpdateStatus({ status: 'none', message: 'Actualizaciones desactivadas' });
     return;
   }
-
   notifyUpdateStatus({ status: 'checking', message: '🔍 Buscando actualizaciones...' });
-
   try {
-
-    let releaseUrl = feedUrl;
-    if (feedUrl.includes('github.com') && feedUrl.includes('/releases/latest')) {
-      const owner = 'LaManditacabra';
-      const repo = 'Overlay';
-      releaseUrl = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
-    }
-
-    const release = await httpGet(releaseUrl);
-
-    if (!release || !release.tag_name) {
-      notifyUpdateStatus({ status: 'error', message: '❌ No se pudo leer la release' });
-      return;
-    }
-
-    const remoteVersion = (release.tag_name || '').replace(/^v/, '');
-    const currentVersion = (app.getVersion() || '0.0.0');
-    const hasUpdate = remoteVersion !== currentVersion;
-
-    if (!hasUpdate) {
-      notifyUpdateStatus({ status: 'none', message: '✅ No hay actualizaciones disponibles' });
-      return;
-    }
-
-    const asset = (release.assets || []).find((a) => a.name.endsWith('zip') || a.name.endsWith('exe'));
-    const assetUrl = asset ? asset.browser_download_url : null;
-
-    if (!assetUrl) {
-      notifyUpdateStatus({ status: 'error', message: '❌ La release no tiene un instalador o ZIP' });
-      return;
-    }
-
-    notifyUpdateStatus({ status: 'available', message: `✅ Actualización disponible: ${remoteVersion}`, info: { version: remoteVersion, assetUrl } });
+    await autoUpdater.checkForUpdates();
   } catch (err) {
-    notifyUpdateStatus({ status: 'error', message: `❌ Error: ${String(err && err.message ? err.message : err)}` });
+    notifyUpdateStatus({ status: 'error', message: '❌ ' + (err && err.message ? err.message : err) });
   }
 }
 
-async function downloadUpdate(assetUrl) {
-  notifyUpdateStatus({ status: 'downloading', message: '📥 Descargando actualización...' });
-
+async function downloadUpdate() {
+  if (!isUpdaterEnabled) return;
   try {
-    const userData = app.getPath('userData');
-    const updatesDir = path.join(userData, 'updates');
-    fs.mkdirSync(updatesDir, { recursive: true });
-
-    const fileName = assetUrl.split('/').pop() || 'update.zip';
-    const dest = path.join(updatesDir, fileName);
-
-    await httpDownload(assetUrl, dest);
-    notifyUpdateStatus({ status: 'downloaded', message: '✅ Descarga completa. Reinicia para instalar.', info: { path: dest } });
+    notifyUpdateStatus({ status: 'downloading', message: '📥 Descargando actualización...' });
+    await autoUpdater.downloadUpdate();
   } catch (err) {
-    notifyUpdateStatus({ status: 'error', message: `❌ Error al descargar: ${String(err && err.message ? err.message : err)}` });
+    notifyUpdateStatus({ status: 'error', message: '❌ Error al descargar: ' + (err && err.message ? err.message : err) });
   }
 }
 
-async function installUpdate(updatePath) {
+function installUpdate() {
+  if (!isUpdaterEnabled) return Promise.resolve();
   try {
-    const exePath = app.getPath('exe');
-    const exeDir = path.dirname(exePath);
-    const exeName = path.basename(exePath);
-
-    const installBat = path.join(app.getPath('temp'), 'stream-chat-overlay-install.bat');
-    const content = [
-      '@echo off',
-      'timeout /t 2 /nobreak >nul',
-      `taskkill /f /im "${exeName}" >nul 2>&1`,
-      `powershell -Command "Expand-Archive -LiteralPath '${updatePath.replace(/'/g, "''")}' -DestinationPath '${exeDir.replace(/'/g, "''")}' -Force"`,
-      `start "" "${exePath}"`,
-      `del "%~f0"`
-    ].join('\r\n');
-
-    fs.writeFileSync(installBat, content, 'utf8');
-    spawn('cmd.exe', ['/c', installBat], { detached: true, windowsHide: true });
-    app.quit();
+    // Cierra la app e instala la actualización ya descargada (o la fuerza si hiciera falta).
+    autoUpdater.quitAndInstall();
   } catch (err) {
-    notifyUpdateStatus({ status: 'error', message: `❌ Error al instalar: ${String(err && err.message ? err.message : err)}` });
+    notifyUpdateStatus({ status: 'error', message: '❌ Error al instalar: ' + (err && err.message ? err.message : err) });
   }
+  return Promise.resolve();
 }
 
 function createWindow() {
@@ -368,6 +335,8 @@ function buildTrayMenu() {
       bootLog('Tray menu: Buscar actualizaciones');
       checkForUpdates();
     }},
+    { type: 'separator' },
+    { label: '📦 Versión ' + app.getVersion(), enabled: false },
     { type: 'separator' },
     { label: '❌ Salir', click: () => {
       bootLog('Tray menu: Salir');
@@ -532,15 +501,23 @@ app.whenReady().then(() => {
   ensurePaths();
   bootLog('BOOT: main.js cargado');
   loadConfig();
+  bootLog('BOOT: config cargada');
+  setupAutoUpdater();
+  bootLog('BOOT: autoUpdater seteado');
+  if (app.isPackaged && config.updateFeedUrl && String(config.updateFeedUrl).trim() !== '') {
+    bootLog('BOOT: chequeando updates en inicio');
+    checkForUpdates();
+  }
   createWindow();
+  bootLog('BOOT: window creada');
   createTray();
-  
-  // Conectar al chat según configuración guardada
+  bootLog('BOOT: tray creado');
   connectToTwitchChat(config.channel, config.token);
-
+  bootLog('BOOT: chat conectado');
   globalShortcut.register('F2', toggleClickThrough);
   globalShortcut.register('F3', createSettings);
   globalShortcut.register('CommandOrControl+Q', () => app.quit());
+  bootLog('BOOT: shortcuts registrados');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -584,15 +561,9 @@ ipcMain.handle('set-config', (e, partial) => {
 });
 ipcMain.handle('open-settings', createSettings);
 ipcMain.handle('check-for-updates', checkForUpdates);
-ipcMain.handle('install-update', () => {
-  const updatesDir = path.join(app.getPath('userData'), 'updates');
-  const files = fs.existsSync(updatesDir) ? fs.readdirSync(updatesDir) : [];
-  const target = files.find((f) => f.endsWith('.zip') || f.endsWith('.exe'));
-  if (target) {
-    return installUpdate(path.join(updatesDir, target));
-  }
-  return Promise.resolve();
-});
+ipcMain.handle('download-update', downloadUpdate);
+ipcMain.handle('install-update', installUpdate);
+ipcMain.handle('get-app-version', () => app.getVersion());
 
 // Twitch OAuth (vinculación de cuenta desde la configuración)
 // Usa Implicit Grant (response_type=token): solo requiere el Client ID, el token

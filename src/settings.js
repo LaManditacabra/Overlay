@@ -16,7 +16,9 @@ const els = {
   interval: document.getElementById('interval'),
   updateFeedUrl: document.getElementById('updateFeedUrl'),
   checkUpdates: document.getElementById('check-updates'),
+  downloadUpdate: document.getElementById('download-update'),
   installUpdate: document.getElementById('install-update'),
+  currentVersion: document.getElementById('current-version'),
   openConfigFolder: document.getElementById('open-config-folder'),
   updateStatus: document.getElementById('update-status'),
   save: document.getElementById('save'),
@@ -146,6 +148,10 @@ async function init() {
 
     const config = await api.getConfig();
     applyConfigToForm(config);
+    try {
+      const v = await api.getAppVersion();
+      if (els.currentVersion) els.currentVersion.textContent = 'Versión actual: ' + (v || '?');
+    } catch (e) { /* ignora */ }
   } catch (e) {
     setStatus('Error al cargar config', 'error');
   }
@@ -163,17 +169,23 @@ async function init() {
     if (!payload || !payload.status) return;
     if (payload.status === 'downloading') {
       setUpdateStatus(payload.message || 'Descargando...', 'idle');
+      els.downloadUpdate.disabled = true;
       els.installUpdate.disabled = true;
     } else if (payload.status === 'downloaded') {
       setUpdateStatus(payload.message || 'Actualización lista', 'ok');
+      els.downloadUpdate.disabled = true;
       els.installUpdate.disabled = false;
     } else if (payload.status === 'available') {
-      setUpdateStatus(payload.message || 'Actualización disponible', 'ok');
+      setUpdateStatus(payload.message || 'Actualización disponible. Descargando...', 'ok');
+      els.downloadUpdate.disabled = false;
+      els.installUpdate.disabled = true;
     } else if (payload.status === 'none') {
       setUpdateStatus(payload.message || 'Sin actualizaciones', 'idle');
+      els.downloadUpdate.disabled = true;
       els.installUpdate.disabled = true;
     } else if (payload.status === 'error') {
       setUpdateStatus(payload.message || 'Error', 'error');
+      els.downloadUpdate.disabled = true;
       els.installUpdate.disabled = true;
     } else {
       setUpdateStatus(payload.message || 'Comprobando...', 'idle');
@@ -190,7 +202,7 @@ async function init() {
         // Si no escribió un canal, usamos el suyo propio (#usuario) para que "solo login" funcione
         const channel = els.channel.value.trim() || ('#' + (result.login || ''));
         if (channel) els.channel.value = channel;
-        await api.setConfig({ token: result.token, username: result.login || els.username.value.trim(), channel });
+        await api.setConfig({ platform: 'twitch', token: result.token, username: result.login || els.username.value.trim(), channel });
         setStatus('Sesión iniciada en Twitch ✅', 'ok');
       } else {
         setStatus('Twitch no devolvió un token', 'error');
@@ -218,6 +230,14 @@ async function init() {
       setUpdateStatus('Error al buscar actualizaciones', 'error');
     } finally {
       els.checkUpdates.disabled = false;
+    }
+  });
+  if (els.downloadUpdate) els.downloadUpdate.addEventListener('click', async () => {
+    try {
+      els.downloadUpdate.disabled = true;
+      await api.downloadUpdate();
+    } catch (e) {
+      setUpdateStatus('Error al descargar la actualización', 'error');
     }
   });
   if (els.installUpdate) els.installUpdate.addEventListener('click', async () => {

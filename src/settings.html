@@ -95,17 +95,19 @@
     <section class="card">
       <h2>🔄 Actualizaciones</h2>
       <div class="row">
-        <div class="field" title="URL donde la app busca actualizaciones. Por default usa GitHub Releases.">
-          <label for="updateFeedUrl">URL del servidor de actualizaciones</label>
-          <input id="updateFeedUrl" type="text" placeholder="https://github.com/LaManditacabra/Overlay/releases/latest" />
+        <div class="field" title="Activá o desactivá las actualizaciones automáticas. Dejalo vacío para desactivarlas. El feed es fijo (GitHub Releases).">
+          <label for="updateFeedUrl">Actualizaciones automáticas</label>
+          <input id="updateFeedUrl" type="text" placeholder="(vacío = desactivado)" />
         </div>
       </div>
       <div class="row">
         <button id="check-updates" type="button" title="Buscar si hay una versión nueva disponible.">🔍 Buscar actualizaciones</button>
+        <button id="download-update" type="button" disabled title="Descargar la actualización disponible.">⬇️ Descargar</button>
         <button id="install-update" type="button" disabled title="Instalar la actualización descargada. Se cerrará y reiniciará solo.">⬇️ Instalar actualización</button>
       </div>
       <p id="update-status" class="status" data-status="idle">Estado: sin comprobar</p>
-      <p class="hint">🔔 La app buscará actualizaciones automáticamente al iniciar. Podés cambiar el servidor o desactivarlo dejando la URL vacía.</p>
+      <p id="current-version" class="status">Versión actual: ...</p>
+      <p class="hint">🔔 La app busca actualizaciones automáticamente al iniciar (vía GitHub). Para desactivarlas, dejá la URL vacía. Al detectar una versión nueva se descarga sola y se instala al reiniciar.</p>
     </section>
 
     <section class="card actions-card">

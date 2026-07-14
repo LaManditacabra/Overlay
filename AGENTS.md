@@ -1,0 +1,178 @@
+# Stream Chat Overlay
+
+App de escritorio hecha con Electron (Windows) que muestra el chat de streaming (Twitch) como una capa transparente superpuesta, con click-through y bandeja del sistema.
+
+## Estructura
+- `main.js`: proceso principal. Ventana overlay (transparente, sin marco, alwaysOnTop), ventana de configuración, bandeja (tray), atajos globales (F2 click-through, F3 config, Ctrl+Q salir), IPC, y conexión IRC a `irc.chat.twitch.tv:6667` para leer el chat. También comprueba/descarga actualizaciones desde GitHub releases.
+- `preload.js`: precarga con `contextIsolation: true` y `nodeIntegration: false`. Expone la API segura de IPC al renderer.
+- `src/index.html` + `src/renderer.js` + `src/style.css`: ventana del overlay (chat visible).
+- `src/settings.html` + `src/settings.js` + `src/settings.css`: ventana de configuración.
+- `config.json`: se guarda en `app.getPath('userData')` (no en el repo). El default está en `DEFAULT_CONFIG` en `main.js`.
+- `publish-updates.js` / `serve-updates.js`: servidor simple de actualizaciones.
+- `assets/icon.ico`: icono.
+
+## Scripts
+- `npm start`: ejecuta la app con DevTools (`STREAM_CHAT_OVERLAY_DEVTOOLS=1`).
+- `npm run build`: compila con `electron-builder --win` (salida en `dist/`).
+- `npm run publish` / `npm run serve-updates`: actualizaciones.
+
+## Reglas
+- Seguridad del renderer: nunca activar `nodeIntegration`. Cualquier acceso a Node/Electron pasa por `preload.js` + IPC (`ipcMain.handle` / `ipcRenderer.invoke`).
+- El overlay es transparente (`transparent: true`, `backgroundColor #00000000`) y usa `setIgnoreMouseEvents` para click-through; no romper ese comportamiento.
+- Config del usuario en `userData/config.json`; nunca hardcodear en el repo. Usar `DEFAULT_CONFIG` como base y fusionar.
+- Chat de Twitch por IRC crudo sobre `net` (sin librerías de chat). Respetar PING/PONG y parseo de PRIVMSG.
+- No ejecutar `npm install` ni `npm run build` salvo que el usuario lo pida.
+- Responder en español.
+
+## Agente
+- El agente por defecto del proyecto es `overlay` (`.kilo/agent/overlay.md`), configurado como `default_agent` en `.kilo/kilo.jsonc`. Se carga automáticamente al abrir el proyecto en VS Code.
+- Al iniciar cada sesión, el agente debe leer este `AGENTS.md` para recordar el estado y los cambios previos, y actualizar la sección "Registro de cambios" cuando se haga algo relevante.
+
+## Registro de cambios
+- 2026-07-06: Se creó el agente `overlay` (`.kilo/agent/overlay.md`) y se fijó como `default_agent` en `.kilo/kilo.jsonc`. Se creó este `AGENTS.md` con el contexto del proyecto.
+- 2026-07-06: Se corrigieron botones/campos de la ventana de configuración que no funcionaban (`src/settings.js`):
+  - Botón "Abrir carpeta de configuración" (`#open-config-folder`): no tenía handler; ahora llama a `electronAPI.openConfigFolder()`.
+  - Campo "Usuario / Nick" (`#username`): estaba desconectado (no en `els`, `applyConfigToForm` ni `readForm`); ahora se lee y guarda (se usa como NICK del IRC en `main.js`).
+  - Campo "URL de actualizaciones" (`#updateFeedUrl`): `readForm()` lo ignoraba y hardcodeaba la URL de GitHub; ahora respeta lo que escribe el usuario.
+  - Causa raíz: `settings.js` definía `init()` dos veces; la segunda pisaba a la primera y se perdían los listeners `onConfigUpdated` y `onUpdaterStatus` (por eso "Buscar actualizaciones" no mostraba resultado). Se unificó en un solo `init()`.
+  - Se eliminó el `alert()` de debug de la línea 1.
+- 2026-07-06: Los botones de la ventana de configuración NO respondían al clic (ni siquiera hover/acción). Diagnóstico y arreglos:
+  - Causa probable 1: el `<script src="settings.js?v=2">` usaba un cache-buster `?v=2` que bajo `file://` podía evitar que Electron cargue el JS (los listeners nunca se adjuntaban). Se quitó el `?v=2` en `src/settings.html`.
+  - Causa probable 2: el overlay tiene `alwaysOnTop: true` y la ventana de configuración no, así que el overlay la tapaba y se comía los clics. Se agregó `alwaysOnTop: true` a `settingsWindow` en `main.js` (`createSettings`).
+  - Se agregó un manejador global de errores en `settings.js` (`window.error` / `unhandledrejection`) que muestra el fallo en el texto de estado `#status` para diagnosticar si el script no carga.
+  - IMPORTANTE entorno: para que `npm start` funcione hay que limpiar la variable `ELECTRON_RUN_AS_NODE` (si está en `1`, el binario de Electron corre como Node puro y `app` queda `undefined` y explota `main.js`). Comando: `set ELECTRON_RUN_AS_NODE=` y luego `npm start`.
+- 2026-07-11: Diagnóstico y arreglos generales del proyecto:
+  - Se agregó un early exit en `main.js` para `ELECTRON_RUN_AS_NODE=1` (ahora muestra error y cierra limpiamente en vez de explotar silenciosamente porque `app` es undefined).
+  - Conexión IRC a Twitch mejorada: ahora envía `CAP REQ :twitch.tv/commands` y `CAP REQ :twitch.tv/tags` para recibir badges, colores de usuario y comandos.
+  - El token de Twitch ahora recibe automáticamente el prefijo `oauth:` si el usuario no lo incluye (antes la autenticación fallaba con tokens sin prefijo).
+  - Parseo de `PRIVMSG` mejorado para extraer badges y color real del usuario desde los tags de Twitch.
+  - Se agregó reconexión automática al chat de Twitch si se cae la conexión (con timer de 3 segundos y cancelación al cambiar de canal).
+  - Arreglado bug de opacidad del fondo de mensajes: `renderer.js` multiplicaba `messageOpacity` por 0.85 extra, haciendo que el fondo fuera más opaco de lo configurado. Ahora respeta el valor configurado.
+  - El overlay ahora usa el color real de Twitch cuando está disponible; si no, genera uno consistente por usuario como antes.
+  - Se agregó estilo CSS para el badge `broadcaster` (rojo).
+  - Ahora se puede desactivar las actualizaciones dejando la URL vacía en la configuración (antes era ignorada y siempre usaba la URL de GitHub por defecto).
+  - Limpiado `settings.css`: se eliminó propiedad `white-space` duplicada en tooltips.
+- 2026-07-11 (parte 2): Se arregló la causa raíz de "los botones del menú no funcionan".
+  - Diagnóstico: el `Tray` de la bandeja NO se creaba en Windows porque el icono resultaba inválido. El boot log mostraba `createTray: icono ... isEmpty=true size=0x0`. Sin tray no hay menú contextual, por eso ningún botón del menú respondía.
+  - Causa 1: el base64 PNG original del icono del tray estaba corrupto (dimensiones declaradas 268435456x268435456) y `nativeImage.createFromBuffer` devolvía imagen vacía.
+  - Causa 2 (la real): al reemplazarlo por un PNG generado en código, la función `chunk()` de `encodePng()` NUNCA escribía los 4 bytes del tipo del chunk ("IHDR"/"IDAT"/"IEND") dentro del buffer. El PNG quedaba sin tipo y `nativeImage` lo rechazaba silenciosamente. Se corrigió `chunk()` para que escriba `[longitud:4][tipo:4][datos:N][crc:4]` y calcule el CRC sobre `tipo+datos`.
+  - Ahora el icono se genera en memoria con un PNG 16x16 válido (82 bytes, color sólido) y se carga con `nativeImage.createFromBuffer`. El boot log confirma `createTray: icono desde buffer, isEmpty=false size=16x16` y `createTray: Tray creado correctamente`.
+  - Se quitó `parent: mainWindow` de `settingsWindow` para que la ventana de Configuración sea independiente del overlay (evita que el overlay transparente always-on-top le robe los clics). Se mantiene `alwaysOnTop: true` y se fuerza `show()`+`focus()` en `createSettings`.
+  - Se reestructuró el menú del tray: primer item "Mostrar/Ocultar overlay", luego Configuración, Click-Through, Buscar actualizaciones y Salir. Se usa `setContextMenu` (clic derecho en Windows) y se eliminó el `tray.on('click')` que interfería con la apertura del menú en algunas versiones de Electron.
+  - Prueba de sanidad: se cargó `src/settings.html` en solitario con su preload y se confirmó que `window.electronAPI` existe, que la config se carga y que los 5 botones (`save`, `reset`, `open-config-folder`, `check-updates`, `install-update`) existen y tienen `electronAPI` disponible. Script de prueba temporal eliminado.
+  - IMPORTANTE: si tras estos cambios el menú del tray sigue sin abrirse, el siguiente sospechoso sería el propio entorno de Windows (icono de sistema bloqueado) o que el proceso previo de electron quedó zombie; siempre matar procesos `electron` previos antes de probar.
+- 2026-07-11 (parte 3 — CAUSA RAÍZ REAL de "los botones no funcionan"): El arreglo del icono del tray (parte 2) era necesario pero NO era la causa de que los botones no respondieran. Se hizo un diagnóstico de extremo a extremo (test de integración que abre Configuración y simula `click()` en `#save`, capturando la consola del renderer y el boot log del main).
+  - SÍNTOMA real: tras clic en "Guardar" el `#status` seguía en "Sin cambios" (valor por defecto del HTML) y el boot log NO mostraba `IPC set-config recibido`. Los listeners de botón nunca se adjuntaban.
+  - CAUSA RAÍZ: `src/settings.js` línea 1 hacía `const { electronAPI } = window;`. El preload expone `electronAPI` vía `contextBridge.exposeInMainWorld('electronAPI', ...)`, lo que crea un binding global `electronAPI` en la página. Al redeclararlo con `const` a nivel superior, el script de `settings.js` lanza `Uncaught SyntaxError: Identifier 'electronAPI' has already been declared` y EL ARCHIVO ENTERO FALLA AL PARSEAR → `init()` nunca corre → ningún botón tiene listener. Confirmado capturando `console-message` del renderer.
+  - Por contraste, `src/renderer.js` (que SÍ funciona) usa `const api = window.electronAPI;` (nombre distinto), evitando la colisión. Esa fue la pista que dio con la solución.
+  - FIX: en `src/settings.js` se renombró el binding local a `api` (`const api = window.electronAPI;`) y se reemplazaron todos los usos `electronAPI.` → `api.` (incl. `if (!api)`). Tras esto, el test e2e mostró `IPC set-config recibido desde 2`, `saveConfig OK, bytes=437` y `#status` = "Guardado correctamente". Cadena renderer→preload→IPC→main verificada de extremo a extremo.
+  - BUG SECUNDARIO encontrado en el mismo test: el handler `ipcMain.handle('set-config', ...)` en `main.js` usaba `e.sender.id()` (función) en vez de `e.sender.id` (propiedad), lo que lanzaba `TypeError: e.sender.id is not a function` y mostraba "Error al guardar". Se corrigió a `e.sender.id`. (Nota: `e.sender.id` es un número/ID de WebContents, no una función.)
+  - MEJORA de UX en el tray: se agregó `tray.on('click', () => tray.popUpContextMenu(buildTrayMenu()))` para que el clic IZQUIERDO también abra el menú en Windows (antes solo el clic derecho lo abría vía `setContextMenu`). `refreshTrayMenu()` ahora reconstruye el `setContextMenu` con el estado fresco (click-through / visibilidad del overlay).
+  - Se usó un hook de prueba temporal gated por `SCO_TEST=1` que abría Configuración y simulaba el clic en Guardar; luego se ELIMINÓ para dejar el código de producción limpio. Verificación final: `main.js` y `settings.js` pasan `node --check` y la app arranca sin errores (boot log limpio, tray creado, IRC conectado).
+- 2026-07-11 (parte 4 — PRUEBA del chat en tiempo real): Se verificó de extremo a extremo la lectura del chat de Twitch sin credenciales reales, usando el servidor mock `mock-irc.js` (escucha en `127.0.0.1:6667` y habla suficiente del protocolo IRC de Twitch: CAP ACK, 001 welcome, JOIN, 353/366 NAMES, y PRIVMSG con tags reales de broadcaster/mod/subscriber/vip y colores).
+  - Cómo reproducir la prueba: (1) `node mock-irc.js` en una terminal; (2) arrancar la app con `TWITCH_IRC_HOST=127.0.0.1` (apunta el IRC al mock en vez de `irc.chat.twitch.tv`), `ELECTRON_RUN_AS_NODE=` (vacío) y opcionalmente `SCO_CHAT_LOG=1` para loguear cada mensaje y el conteo de `.chat-message` en el DOM; (3) la config debe tener `platform:"twitch"`, `demoMode:false` y un canal (p.ej. `#test`).
+  - RESULTADO: el boot log confirmó `Conectado a Twitch IRC para canal #test`, 4 mensajes parseados con badges/colores correctos y `.chat-message en DOM = 1..4`. Cadena IRC→parseo PRIVMSG→`chat-message` IPC→`renderer.addMessage()` verificada de extremo a extremo. También se confirmó que un usuario sin color (`color:null`) cae en la rama de color generado del renderer.
+  - BUG encontrado y arreglado en `mock-irc.js`: `sendMockMessages(chan)` referenciaba `send` (definida dentro del callback de `createServer`) y `chan` (definida dentro del `if (JOIN)`), ambos fuera de scope → `ReferenceError: send is not defined` / `chan is not defined` que tiraba el mock tras el primer JOIN. Se corrigió: `sendMockMessages(send, chan)` recibe ambos como parámetros y el `setTimeout` que la dispara se movió dentro del bloque `JOIN` (donde `chan` existe). El mock ahora envía los 4 mensajes y cierra limpio.
+  - NOTA: el boot log vive en `%TEMP%/stream-chat-overlay-boot.log`. Para verlo en vivo: `Get-Content $env:TEMP\stream-chat-overlay-boot.log -Tail 40` (PowerShell).
+  - IMPORTANTE para chat REAL: para conectar a Twitch de verdad se necesita un token OAuth válido en `config.token` (la app le antepone `oauth:` si falta) y un `username` correcto; dejar `TWITCH_IRC_HOST` sin setear para usar `irc.chat.twitch.tv:6667`.
+- 2026-07-11 (parte 5 — DEJAR EL PROYECTO LISTO PARA USAR): El usuario veía "archivos del overlay para abrirlo" y parecían de una etapa anterior. Causa: `dist/win-unpacked/Stream Chat Overlay.exe` fue compilado el 4/7/2026, ANTES de todos los arreglos (icono tray, electronAPI, parseo chat). `iniciar-overlay.bat` abría ese exe viejo.
+  - FIX: `iniciar-overlay.bat` ahora corre el código actual con `npm start` (setea `ELECTRON_RUN_AS_NODE=` vacío). Así al doble clic se lanza la versión con todos los arreglos, sin depender del exe desactualizado. `fix-and-run.bat` sigue como alternativa con chequeo de Node/deps.
+  - Limpieza: se eliminaron artefactos de prueba `mock.log` y el archivo suelto `npm` (0 bytes).
+  - VALIDACIÓN: `node --check` pasa en `main.js`, `preload.js`, `mock-irc.js`, `src/renderer.js`, `src/settings.js`.
+  - NOTA: `dist/` sigue con el exe viejo (4/7). Para regenerar un `.exe` actualizado y autónomo (sin Node) se usa `build.bat` (`npm run build`), pero requiere `npm install` y es pesado; no se ejecutó salvo pedido. Mientras tanto, `iniciar-overlay.bat` usa el código fuente actual.
+  - CONFIG para usar de verdad: `platform:"twitch"`, `demoMode:false`, canal real (ej. `#tucanal`) y `token` OAuth válido (el "fake" no conecta a Twitch real). Se cambia desde el menú (F3 o ítem del tray).
+- 2026-07-11 (parte 6 — LOGIN SIMPLE con Twitch, un solo botón): El usuario quería un único botón "Iniciar sesión con Twitch" en la configuración que abra el navegador, le permita poner su usuario/contraseña de Twitch y autorizar, sin campos de Client ID/Secret/token. Se rehízo el flujo como **OAuth Implicit Grant** (`response_type=token`): solo necesita un Client ID (sin Client Secret). El token viene en el fragmento de la redirección y se captura con una página HTML local que lo reenvía por POST al server en `127.0.0.1:3000`.
+  - `main.js`: constante `TWITCH_CLIENT_ID` (embutir el Client ID de la app del usuario; si está vacía usa `config.clientId`). Handler `twitch-auth-start` usa Implicit Grant, sirve un HTML que relée el fragmento a `/token`, y valida el token (`GET /oauth2/validate`) para obtener el `login`. Devuelve `{ token, login }`. Funciones: `validateTwitchToken` (se eliminó `exchangeTwitchCode`).
+  - `preload.js`: expone `twitchAuthStart(creds)`.
+  - `src/settings.html`: se eliminaron los campos `clientId`, `clientSecret` y `token` de la UI (el token se guarda solo en config, no se muestra). Queda un único botón `link-twitch` ("🔗 Iniciar sesión con Twitch"). El canal sigue siendo un campo aparte (qué chat leer).
+  - `src/settings.js`: el handler del botón llama `api.twitchAuthStart({})` (sin credenciales del form) y rellena `token`+`username`+guarda. Si el campo Canal está vacío, autocompleta con `#` + el usuario logueado, para que "solo login" ya conecte al chat propio.
+  - NOTA: el Client ID es un dato PÚBLICO (no secreto); se embute en el binario para que el botón funcione solo. El usuario DEBE registrar `http://localhost:3000` como Redirect URI en su app de Twitch (consola de developers) para que el flujo funcione. Client ID ya embutido en `TWITCH_CLIENT_ID` (main.js).
+- 2026-07-11 (parte 7 — LIMPIEZA para "solo correrlo"): Se eliminaron las versiones anteriores que confundían al usuario: `dist/` (el `.exe` compilado el 4/7, previo a todos los arreglos) y `releases/1.0.0` (resto de build viejo). Quedó solo lo necesario para ejecutar el código actual: `main.js`, `preload.js`, `src/`, `package.json`, `node_modules`, `assets/`, `iniciar-overlay.bat` (launcher que corre `npm start`), más los scripts de actualizaciones (`publish-updates.js`, `serve-updates.js`) y `build.bat` (recompilar exe si se desea). `mock-irc.js` queda como helper de prueba (no es necesario para correr).
+  - Para usar: doble clic en `iniciar-overlay.bat` (setea `ELECTRON_RUN_AS_NODE=` y corre el código actual con todos los arreglos). No depende de ningún exe en `dist/`.
+  - Si en el futuro se quiere un `.exe` autónomo y actualizado, se corre `build.bat` (`npm run build`), que regenera `dist/` a partir del código actual.
+- 2026-07-12 (parte 8 — BUILD .exe para compartir): El usuario quiso pasarle el overlay a un amigo. Se generó el build autónomo con `npm run build` (electron-builder `--win`, target `dir`). Resultado: `dist/win-unpacked/Stream Chat Overlay.exe` (180 MB, 12/7/2026, código actual con todos los arreglos + Client ID embebido). Verificado: el exe arranca, crea el tray y cierra limpio (`EXIT: code=0`). El amigo solo descomprime la carpeta y hace doble clic en el exe (no necesita Node). Al iniciar sesión usa su propia cuenta de Twitch; el Client ID embebido es el de la app del usuario y el redirect `http://localhost:3000` ya está registrado, así que el amigo no configura nada.
+- 2026-07-13 (parte 9 — ACTUALIZACIONES AUTOMÁTICAS vía GitHub con electron-updater): La lógica casera de updates (que usaba `api.github.com/.../releases/latest` y buscaba un asset `.zip`/`.exe`) era "no funcional": no tenía handler de descarga cableado, el build solo generaba la carpeta `win-unpacked` (sin asset descargable), la API de GitHub tiene rate-limit, y la instalación rompía al correr desde `npm start`. Se reemplazó por **electron-updater** (librería estándar de electron-builder), que ya venía en mente pero no estaba instalada.
+  - `npm install electron-updater --save-dev` (quedó en `devDependencies` como `^6.8.9`).
+  - `main.js`: se eliminaron `httpGet`/`httpDownload` y las funciones caseras `checkForUpdates`/`downloadUpdate`/`installUpdate`. Ahora `setupAutoUpdater()` configura `autoUpdater.setFeedURL({ provider:'github', owner:'LaManditacabra', repo:'Overlay' })`, con `autoDownload=true` y `autoInstallOnAppQuit=true`. Los eventos (`checking-for-update`, `update-available`, `update-not-available`, `download-progress`, `update-downloaded`, `error`) notifican a la UI vía `updater-status`. Se hace auto-check al iniciar si `config.updateFeedUrl` no está vacío. Los IPC son `check-for-updates`, `download-update` y `install-update` (este último llama `autoUpdater.quitAndInstall()`).
+  - `preload.js`: expone `downloadUpdate`.
+  - `package.json`: `win.target` ahora es `["zip","dir"]` (el **zip** es el asset que descarga electron-updater; `dir` mantiene la carpeta portable para el amigo). `artifactName` = `StreamChatOverlay-${version}.${ext}` (el zip queda `StreamChatOverlay-1.0.0.zip`). Script `publish` = `electron-builder --win --publish always` (sube zip + `latest.yml` a GitHub; requiere la env var `GH_TOKEN`).
+  - `src/settings.html` + `src/settings.js`: nuevo botón "⬇️ Descargar" (`#download-update`) entre Buscar e Instalar; los estados del updater habilitan/deshabilitan los botones (Disponible → habilita Descargar; Descargando → bloquea ambos; Descargado → habilita Instalar). Hint actualizado: la app busca/descarga sola al iniciar y se instala al reiniciar.
+  - Flux de publicación para que el amigo se actualice solo: (1) `npm run build` (genera `dist/StreamChatOverlay-1.0.0.zip` + `latest.yml`); (2) `set GH_TOKEN=ghp_xxx` y `npm run publish` (electron-builder sube la release a GitHub). El exe autónomo en la carpeta `win-unpacked` del amigo detecta la nueva versión, la descarga y la aplica al reiniciar.
+  - NOTA: `publish-updates.js` (server propio casero) quedó sin uso ahora que el feed es GitHub; se mantiene en el repo pero ya no se invoca desde `npm run publish`. `serve-updates.js` sigue disponible solo si algún día se quiere un server propio.
+  - VALIDACIÓN: `node --check` pasa en `main.js`, `preload.js`, `src/settings.js`; `package.json` es JSON válido; no quedan referencias a `httpGet`/`httpDownload`. Falta probar en vivo (requiere un build + release de GitHub con `GH_TOKEN`).
+  - NOTAS DE DESPLIEGUE (importantes para que funcione de verdad):
+    - Hay que **subir `version` en `package.json`** antes de cada `npm run publish`; si se publica la misma versión, electron-updater reporta "ya tenés la última" y no instala.
+    - El chequeo/descarga automática solo corre en el build **empaquetado** (`app.isPackaged`); en `npm start` (dev) no se auto-instala (es solo para probar la detección).
+    - La app del amigo se actualiza sobrescribiendo su propia carpeta `win-unpacked`. Si la carpeta queda bajo una ruta protegida (p.ej. `Program Files`), UAC bloquea la escritura y la actualización falla en silencio: indicarle que mantenga la carpeta en una ubicación de usuario (o, en el futuro, cambiar `win.target` a `nsis` para usar un instalador con permisos).
+    - El campo "Actualizaciones automáticas" de la config solo habilita/desactiva (vacío = off); el feed es fijo en GitHub (`LaManditacabra/Overlay`), no es una URL editable.
+    - NOTA DE ENTORNO (build): en este sandbox el `electron-builder` se cuelga al comprimir el `.zip` (se detiene en el paso `building target=zip`) y además no empaqueta `node_modules` (la detección de npm devuelve `searchDirectories=[]`, así que `electron-updater` no entra al paquete). Por eso el `build` + `publish` NO se pueden correr desde el agente/sandbox: deben ejecutarse en la máquina del usuario (Windows normal), donde electron-builder funciona (así se generó el exe del 12/7). En esa máquina, con `files` copiando `node_modules` (`["**/*","!node_modules/electron/**/*"]`), el `.exe` resultante SÍ incluye `electron-updater` y el zip + `latest.yml` se generan bien para publicar.
+    - Para probar en vivo desde la máquina del usuario: (1) `npm run build`; (2) `set GH_TOKEN=ghp_xxx` y `npm run publish` (requiere repo público y token con `public_repo`). El exe empaquetado queda en `dist/win-unpacked/Stream Chat Overlay.exe`.
+    - LAUNCHER de publicación: `actualizar-overlay.bat` (en la raíz, junto a `iniciar-overlay.bat`). Doble clic → pide el token de GitHub por consola (no se guarda en ningún archivo), corre `npm run build` y luego `npm run publish`. Recuerda subir `version` en `package.json` antes y tener el repo en público.
+- 2026-07-13 (parte 10 — PRIMER RELEASE PUBLICADO en GitHub): Se ejecutó `actualizar-overlay.bat` en la máquina del usuario (Windows normal, donde electron-builder SÍ corre) con el `GH_TOKEN` (scope `public_repo`) y el repo en público. Resultado: `npm run build` generó `dist/StreamChatOverlay-1.0.1.zip` (~530 MB, porque empaqueta todo `node_modules`) + `dist/latest.yml` + `dist/win-unpacked/Stream Chat Overlay.exe` (1.0.1, ya con `electron-updater` adentro), y `npm run publish` creó la release `v1.0.1` en `LaManditacabra/Overlay` subiendo el zip + `latest.yml`. Log final: "LISTO! La actualizacion se publico correctamente."
+  - CÓMO PROBAR LA AUTO-UPDATE REAL: el amigo debe correr el `.exe` de `dist/win-unpacked` (1.0.1, con electron-updater); el exe del 12/7 NO se actualiza solo (no traía electron-updater). Luego subir `version` a 1.0.2 en `package.json` y volver a correr `actualizar-overlay.bat`: el exe 1.0.1 detecta 1.0.2, lo descarga y lo instala al reiniciar. El auto-check solo corre en el build empaquetado (`app.isPackaged`), no en `npm start`.
+  - PENDIENTE de optimización: el asset pesa ~530 MB porque `files` empaqueta todo `node_modules`. Funciona pero es lento para el amigo; conviene empaquetar solo `electron-updater` (+ deps) para bajar a ~30-50 MB. Hacerlo en la próxima versión (1.0.2).
+  - SEGURIDAD: el `GH_TOKEN` del usuario quedó expuesto en el chat del agente; recomendado regenerarlo tras la prueba.
+  - NOTA entorno (repite parte 9): en el sandbox del agente electron-builder se cuelga en `building target=zip` y no empaqueta `node_modules`; por eso build+publish deben correr en la máquina del usuario, no en el agente.
+- 2026-07-13 (parte 11 — MOSTRAR VERSIÓN para evitar confusión): El usuario pidió ver el número de versión en el menú para saber en qué build está (clave al probar la auto-update). Se agregó:
+  - `main.js` `buildTrayMenu()`: item informativo deshabilitado `📦 Versión <app.getVersion()>` al final del menú del tray.
+  - Nuevo IPC `get-app-version` (main.js) expuesto en `preload.js` como `getAppVersion`.
+  - `src/settings.html` + `src/settings.js`: en la sección "Actualizaciones" se muestra `Versión actual: X.Y.Z` (se carga vía `api.getAppVersion()` al abrir Configuración). Así el usuario puede confirmar si pasó de 1.0.1 a 1.0.2 tras una actualización.
+  - VALIDACIÓN: `node --check` pasa en `main.js`, `preload.js`, `src/settings.js`.
+- 2026-07-13 (parte 12 — BUG en login de Twitch tras limpieza de código muerto): Al borrar el import `const http = require('http')` en la parte 9 (se asumió que quedaba sin uso), se rompió el login de Twitch: el handler `twitch-auth-start` usa `http.createServer(...)` para capturar el token desde el redirect `http://localhost:3000`, y sin el import daba `ReferenceError: http is not defined`. Se restauró `const http = require('http')` en `main.js`. El build empaquetado 1.0.1 (parte 10) se generó SIN este fix, así que para que el amigo no tenga el bug hay que rebuild (subir `version` a 1.0.2 y correr `actualizar-overlay.bat`). Nota: `spawn` sí quedó correctamente sin uso y no se restauró.
+- 2026-07-13 (parte 13 — DIAGNÓSTICO ❌ No published versions on GitHub): El error no era de código; el updater está bien configurado, pero el repo `LaManditacabra/Overlay` no tenía ninguna release publicada, así que `electron-updater` no encontraba versión. Verificación directa: `https://github.com/LaManditacabra/Overlay/releases/latest` mostró "There aren’t any releases here". Fix: publicar una release real desde `actualizar-overlay.bat` (build + publish), recordando subir `version` en `package.json` antes para generar un tag nuevo y que no diga “ya tenés la última”. Repo debe estar en público y `GH_TOKEN` con `public_repo`.
+- 2026-07-13 (parte 14 — FIX updater: faltaba `latest.yml` en la release): El overlay empaquetado tiraba `Cannot find latest.yml ... HttpError: 404`. Se intentó `"publishAutoUpdate": true` en `package.json`, pero electron-builder 26.15.3 lo rechaza como propiedad desconocida y rompe el build. Se revirtió ese cambio. Solución final: se agregó `publish-latest-yml.js`, que genera `latest.yml` a partir del `.zip` de `dist/` y lo adjunta manualmente a la release de GitHub usando la API. `actualizar-overlay.bat` ahora ejecuta este script como paso 3 después de `npm run publish`. Para la próxima publicación: subir `version` en `package.json`, correr el bat y luego verificar que `latest.yml` aparezca en los Assets de la release.
+- 2026-07-13 (parte 15 — PUBLICADA release 1.0.8 con `latest.yml`): El usuario publicó manualmente la release 1.0.8 y luego ejecutó el flujo de actualización. El updater ya debería poder encontrar `latest.yml` en `https://github.com/LaManditacabra/Overlay/releases/download/v1.0.8/latest.yml` y descargar/instalar la actualización desde el `.exe` 1.0.6/1.0.7.
+- 2026-07-13 (parte 16 — FIX ENOENT en `app-update.yml` con target `dir`): En Windows, el build `dir` no incluye la carpeta `resources` por defecto, así que `electron-updater` fallaba al escribir `resources/app-update.yml` con `ENOENT`. Se agregó `ensureUpdaterFile()` en `main.js`, que crea `resources/` y un `app-update.yml` vacío al iniciar si la app está empaquetada. Para que tome efecto hay que rebuild (`npm run build`) y reemplazar el `.exe`.
+- 2026-07-14 (parte 17 — RESTAURACIÓN de `dist/win-unpacked` tras build incompleto):
+  - `dist/` había desaparecido (probablemente limpiado), se regeneró con `build.bat` pero el build quedó a medio terminar: `win-unpacked/` tenía solo `resources/app.asar` (app compilada) y `win-unpacked.tmp/` tenía el runtime de Electron (electron.exe, DLLs, etc.) con `default_app.asar` (app default de Electron).
+  - Se mergearon los archivos manualmente: `rsync -av --exclude='resources/' dist/win-unpacked.tmp/ dist/win-unpacked/` para copiar el runtime sin pisar `resources/app.asar`.
+  - Resultado: `dist/win-unpacked/` tiene `electron.exe` + runtime + `resources/app.asar` → build funcional de 1.0.8 (~1 GB).
+  - Se eliminó `dist/win-unpacked.tmp/` (artefacto de build incompleto).
+  - Todos los archivos fuente pasan `node --check`.
+- 2026-07-14 (parte 18 — CAUSA RAÍZ de "el overlay no abre" y FIX):
+  - **SÍNTOMA:** al ejecutar `dist/win-unpacked/electron.exe`, el proceso aparecía en Task Manager (Details) pero NO se abría la ventana ni aparecía el icono de bandeja.
+  - **CAUSA RAÍZ:** dos variables faltantes en `main.js`:
+    1. `const DEFAULT_CONFIG = {...}` había sido eliminada accidentalmente al refactorizar el código, pero `loadConfig()` (líneas 73, 78) la referenciaba → `ReferenceError` al arrancar.
+    2. `const UPDATE_OWNER` y `const UPDATE_REPO` no estaban definidas, pero `setupAutoUpdater()` (línea 115) las usaba → segundo `ReferenceError`.
+    Ambos errores mataban la promesa de `app.whenReady().then(...)` sin llegar a `createWindow()` ni `createTray()`, pero el proceso quedaba vivo (por eso aparecía en Task Manager sin ventana).
+  - **FIX:** se restauraron `DEFAULT_CONFIG` (con todos los defaults originales: `platform:'demo'`, `updateFeedUrl:'https://github.com/LaManditacabra/Overlay/releases/latest'`, etc.) y se agregaron las constantes `UPDATE_OWNER='LaManditacabra'`, `UPDATE_REPO='Overlay'`, más `let config = { ...DEFAULT_CONFIG }` (líneas 34-56 de `main.js`).
+  - Se reconstruyó `app.asar` con el código fijado (2.5 MB, solo deps de producción) y se reemplazó en `dist/win-unpacked/resources/`.
+  - `node --check` pasa en `main.js`, `preload.js`, `src/settings.js`.
+- 2026-07-14 (parte 19 — FIX: login con Twitch no cambiaba platform de 'demo' a 'twitch'):
+  - **SÍNTOMA:** Tras iniciar sesión con Twitch (botón "Iniciar sesión con Twitch"), el overlay seguía en modo demo y no conectaba al IRC real.
+  - **CAUSA RAÍZ:** `settings.js` línea 205, el handler del botón guardaba `{ token, username, channel }` pero **no seteaba `platform: 'twitch'`**. Como el default es `platform: 'demo'`, `connectToTwitchChat()` en `main.js` retornaba inmediatamente al ver `config.platform === 'demo'`.
+  - **FIX:** Se agregó `platform: 'twitch'` al objeto de configuración en el handler de `linkTwitch`.
+  - Se reconstruyó `app.asar` con el fix.
+- 2026-07-14 (parte 20 — TRANSICIÓN al recibir el primer mensaje real de Twitch):
+  - **PEDIDO:** al recibir el primer mensaje real de Twitch, detener los mensajes simulados, limpiar el historial con animación y seguir solo con mensajes reales.
+  - Se agregó flag `firstRealMessageHandled` en `renderer.js`. Cuando llega el primer `chat-message` con `type: 'message'`, se desactiva `demoMode`, se limpia el intervalo de demo y se llama `clearMessagesWithTransition()` que agrega clase CSS `.fade-out` a todos los `.chat-message` (anima opacidad→0 y translateX→20px en 300ms). Al terminar la transición, se vacía el contenedor y se agrega el mensaje real.
+  - CSS: animación `fadeOut` en `style.css`.  
+  - `restartInterval()` ya no arranca el intervalo si `demoMode` es false. `applyConfig()` fuerza `demoMode=false` si ya se recibió un mensaje real.
+  - Se reconstruyó `app.asar`.
+- 2026-07-14 (parte 21 — VERSIÓN 1.0.9 publicada):
+  - Se actualizó `package.json` a v1.0.9.
+  - Se reconstruyó `dist/win-unpacked/resources/app.asar` con la versión 1.0.9 y todos los fixes anteriores.
+  - El `.exe` empaquetado ya muestra "Versión 1.0.9" en el menú del tray.
+  - **SÍNTOMA:** al ejecutar `dist/win-unpacked/electron.exe`, el proceso aparecía en Task Manager (Details) pero NO se abría la ventana ni aparecía el icono de bandeja.
+  - **CAUSA RAÍZ:** dos variables faltantes en `main.js`:
+    1. `const DEFAULT_CONFIG = {...}` había sido eliminada accidentalmente al refactorizar el código, pero `loadConfig()` (líneas 73, 78) la referenciaba → `ReferenceError` al arrancar.
+    2. `const UPDATE_OWNER` y `const UPDATE_REPO` no estaban definidas, pero `setupAutoUpdater()` (línea 115) las usaba → segundo `ReferenceError`.
+    Ambos errores mataban la promesa de `app.whenReady().then(...)` sin llegar a `createWindow()` ni `createTray()`, pero el proceso quedaba vivo (por eso aparecía en Task Manager sin ventana).
+  - **FIX:** se restauraron `DEFAULT_CONFIG` (con todos los defaults originales: `platform:'demo'`, `updateFeedUrl:'https://github.com/LaManditacabra/Overlay/releases/latest'`, etc.) y se agregaron las constantes `UPDATE_OWNER='LaManditacabra'`, `UPDATE_REPO='Overlay'`, más `let config = { ...DEFAULT_CONFIG }` (líneas 34-56 de `main.js`).
+  - Se reconstruyó `app.asar` con el código fijado (2.5 MB, solo deps de producción) y se reemplazó en `dist/win-unpacked/resources/`.
+  - `node --check` pasa en `main.js`, `preload.js`, `src/settings.js`.
+
+---
+## Estado actual de la sesión (14/07/2026)
+
+**Versión actual:** 1.0.9 (commit `1743904`)
+**Cambios commiteados:** main.js, preload.js, renderer.js, settings.js, style.css, settings.html, package.json, package-lock.json, actualizar-overlay.bat, publish-latest-yml.js, AGENTS.md
+
+**Pendiente:**
+- Publicar release 1.0.9 en GitHub: borrar `dist/win-unpacked/resources/app-new.asar` (archivo huerfano de 0 bytes, bloqueado por Windows) y ejecutar `actualizar-overlay.bat` con GH_TOKEN.
+
+**Problemas conocidos:**
+- `app-new.asar` queda como archivo residual de 0 bytes en `dist/win-unpacked/resources/`; no se puede borrar desde WSL (bloqueado por Windows). Electron-builder falla si esta presente. Solucion: borrar manualmente desde Windows Explorer o reiniciar.
+- `git config` local seteado como "Stream Chat Overlay" (email: overlay@streamchat.local) solo para este repositorio.
+- Electron-builder no funciona en el sandbox (se cuelga en building target=zip); build+publish deben ejecutarse en la maquina del usuario (Windows).
+
